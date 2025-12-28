@@ -1,0 +1,152 @@
+#authentication logic
+from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pwdlib import PasswordHash
+from passlib.context import CryptContext
+from jose import jwt, JWTError
+from datetime import datetime, timedelta, timezone
+from schema import UserCreate, UserPublic, UserInDB, LoginRequest, TokenRefreshRequest
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+import uuid
+
+router = APIRouter()
+
+
+#password hashing
+#pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+password_hash = PasswordHash.recommended()
+
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# --- Temporary Databases ---
+users_db = {}
+refresh_tokens_db = {}
+
+#HELPER FUNCTIONS
+def hash_password(password: str) -> str:
+    return password_hash.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool: 
+    return password_hash.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: timedelta):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + expires_delta
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def create_refresh_token(data: dict, expires_delta: timedelta):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + expires_delta
+    to_encode.update({"exp": expire})
+    refreshed_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return refreshed_jwt
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise JWTError("Invalid token: no subject")
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+# --- Dependency ---
+def get_current_user_dep(token: str = Depends(oauth2_scheme)):
+    payload = verify_token(token)
+    user_id: str = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    #check if user exists in dictionary database
+    for user in users_db.values():
+        if str(user.id) == user_id:
+            return user
+    raise HTTPException(status_code=404, detail="User not found")
+
+#ENDPOINTS
+@router.post("/register", response_model=UserPublic, status_code=201)
+def register(user_data: UserCreate):
+    if user_data.username in users_db:
+        raise HTTPException(status_code=409, detail="Username already registered")
+    for u in users_db.values():
+        if u.email == user_data.email:
+            raise HTTPException(status_code=409, detail="Email already exists")
+    user_id = str(uuid.uuid4())
+    hashed_pw = hash_password(user_data.password)
+    new_user = UserInDB(
+        id=user_id,
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=hashed_pw,
+        role="user",
+        created_at=datetime.now(timezone.utc)
+    )
+    users_db[user_data.username] = new_user
+    return UserPublic(**new_user.dict())
+
+@router.post("/login")
+def login(request: OAuth2PasswordRequestForm = Depends()):
+    # Find user by username or email
+    user = None
+    for u in users_db.values():
+        if u.username == request.username or u.email == request.username:
+            user = u
+            break
+    if not user or not verify_password(request.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Create tokens
+    access_token = create_access_token(data={"sub": str(user.id), "role": user.role}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    refresh_token = create_refresh_token(data={"sub": str(user.id)}, expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+
+    #store refresh token
+    refresh_tokens_db[str(user.id)] = {"refresh_token": refresh_token, "revoked": False}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
+
+@router.get("/me", response_model=UserPublic)
+def read_current_user(current_user: dict = Depends(get_current_user_dep)):
+    return current_user
+
+@router.post("/logout")
+def logout(token: str = Depends(oauth2_scheme)):
+    payload = verify_token(token)
+    user_id = payload["sub"]
+    if user_id in refresh_tokens_db:
+        del refresh_tokens_db[user_id]
+    return {"msg": "Logged out successfully"}
+
+@router.post("/refresh")
+def refresh_access_token(request: TokenRefreshRequest):
+    #Verify  the incoming refresh token
+    payload = verify_token(request.refresh_token)
+    user_id = payload.get("sub")
+    # Check if token belong to user
+    token_entry = refresh_tokens_db.get(user_id)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
+    if not token_entry or token_entry["revoked"]:
+        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
+    # Ensure the provided token matches the stored token for the user
+    if token_entry["refresh_token"] != request.refresh_token:
+        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
+    #Find the user to get their current role
+    user = None
+    for u in users_db.values():
+        if str(u.id) == user_id:
+            user = u
+            break
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    #issue new access token
+    new_access = create_access_token(data={"sub": str(user.id), "role": user.role}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    return {
+        "access_token": new_access,
+        "token_type": "bearer"
+    }
+
