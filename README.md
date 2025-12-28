@@ -1,10 +1,4 @@
 
-- `.env_example` → `.env` instructions  
-- Adding your security key  
-- How to load environment variables properly  
-- A polished structure suitable for GitHub  
-
----
 
 # 📘 **Mini Social Media Feed API — FastAPI Backend**
 
