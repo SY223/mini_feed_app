@@ -33,33 +33,38 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + expires_delta
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def create_refresh_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + expires_delta
-    to_encode.update({"exp": expire})
-    refreshed_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return refreshed_jwt
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise JWTError("Invalid token: no subject")
         return payload
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.JWTClaimsError:
+        raise HTTPException(status_code=401, detail="Invalid claims (check issuer or audience)")
+    except jwt.JWTError as e:
+        # This catches signature mismatches or malformed strings
+        print(f"JWT Decode Error: {str(e)}")
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
 
 # --- Dependency ---
 def get_current_user_dep(token: str = Depends(oauth2_scheme)):
     payload = verify_token(token)
     user_id: str = payload.get("sub")
+    #Check if refresh token is revoked
+    token_entry = refresh_tokens_db.get(user_id)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid token")
+    if token_entry and token_entry.get("revoked") is True:
+        raise HTTPException(status_code=401, detail="Token has been revoked. Please log in again.")
     #check if user exists in dictionary database
     for user in users_db.values():
         if str(user.id) == user_id:
@@ -97,12 +102,12 @@ def login(request: OAuth2PasswordRequestForm = Depends()):
             break
     if not user or not verify_password(request.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    user_id = str(user.id)
     # Create tokens
-    access_token = create_access_token(data={"sub": str(user.id), "role": user.role}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    refresh_token = create_refresh_token(data={"sub": str(user.id)}, expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-
+    access_token = create_access_token(data={"sub": user_id, "role": user.role}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    refresh_token = create_refresh_token(data={"sub": user_id}, expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     #store refresh token
-    refresh_tokens_db[str(user.id)] = {"refresh_token": refresh_token, "revoked": False}
+    refresh_tokens_db[user_id] = {"refresh_token": refresh_token, "revoked": False}
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -116,25 +121,38 @@ def read_current_user(current_user: dict = Depends(get_current_user_dep)):
 @router.post("/logout")
 def logout(token: str = Depends(oauth2_scheme)):
     payload = verify_token(token)
-    user_id = payload["sub"]
+    user_id = payload.get("sub")
     if user_id in refresh_tokens_db:
+        refresh_tokens_db[user_id]["revoked"] = True
+        print(refresh_tokens_db[user_id])
         del refresh_tokens_db[user_id]
-    return {"msg": "Logged out successfully"}
+    return {"msg": "Logged out successfully done."}
 
 @router.post("/refresh")
 def refresh_access_token(request: TokenRefreshRequest):
     #Verify  the incoming refresh token
     payload = verify_token(request.refresh_token)
-    user_id = payload.get("sub")
+    token_type = payload.get("type")
+    if token_type != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    user_id = str(payload.get("sub"))
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
     # Check if token belong to user
     token_entry = refresh_tokens_db.get(user_id)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
-    if not token_entry or token_entry["revoked"]:
-        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
-    # Ensure the provided token matches the stored token for the user
+    # 3. Content Match - Let's see exactly what's failing
+    stored_token = token_entry["refresh_token"]
+    provided_token = request.refresh_token
+
+    if stored_token != provided_token:
+        raise HTTPException(status_code=401, detail="Token mismatch")
+    if token_entry.get("revoked") is True:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+
+    # 4. Content Match
     if token_entry["refresh_token"] != request.refresh_token:
-        raise HTTPException(status_code=401, detail="Invalid or revoked refresh token")
+        raise HTTPException(status_code=401, detail="Token mismatch")
     #Find the user to get their current role
     user = None
     for u in users_db.values():
@@ -142,11 +160,24 @@ def refresh_access_token(request: TokenRefreshRequest):
             user = u
             break
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User associated with this token no longer exists")
     #issue new access token
-    new_access = create_access_token(data={"sub": str(user.id), "role": user.role}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    new_access_token = create_access_token(
+        data={"sub": user_id, "role": user.role},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    new_refresh_token = create_refresh_token(
+        data={"sub": user_id},
+        expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    # Overwrite old refresh token (rotation)
+    refresh_tokens_db[user_id] = {
+        "refresh_token": new_refresh_token,
+        "revoked": False,
+    }
     return {
-        "access_token": new_access,
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
         "token_type": "bearer"
     }
 
