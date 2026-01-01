@@ -2,15 +2,15 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
-from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
-from schema import UserCreate, UserPublic, UserInDB, LoginRequest, TokenRefreshRequest
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+from schemas.auth_schema import UserCreate, UserPublic, UserInDB, LoginRequest, TokenRefreshRequest
+from services.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+from databases.database import users_db, refresh_tokens_db
 import uuid
 
-router = APIRouter()
 
+router = APIRouter()
 
 #password hashing
 #pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -18,10 +18,6 @@ password_hash = PasswordHash.recommended()
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-# --- Temporary Databases ---
-users_db = {}
-refresh_tokens_db = {}
 
 #HELPER FUNCTIONS
 def hash_password(password: str) -> str:
