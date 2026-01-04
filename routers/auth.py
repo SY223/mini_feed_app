@@ -18,9 +18,6 @@ password_hash = PasswordHash.recommended()
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-# Optional scheme for endpoints that allow unauthenticated access
-from fastapi.security import OAuth2PasswordBearer as _OAuth2PasswordBearer
-oauth2_scheme_optional = _OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 #HELPER FUNCTIONS
 def hash_password(password: str) -> str:
@@ -69,16 +66,6 @@ def get_current_user_dep(token: str = Depends(oauth2_scheme)):
         if str(user.id) == user_id:
             return user
     raise HTTPException(status_code=404, detail="User not found")
-
-
-def get_current_user_optional(token: str = Depends(oauth2_scheme_optional)):
-    """Return current user or None if no valid token provided."""
-    if not token:
-        return None
-    try:
-        return get_current_user_dep(token)
-    except HTTPException:
-        return None
 
 #ENDPOINTS
 @router.post("/register", response_model=UserPublic, status_code=201)
