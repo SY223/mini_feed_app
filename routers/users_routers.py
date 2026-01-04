@@ -71,7 +71,6 @@ def update_my_profile(
         file_extension = os.path.splitext(avatar.filename)[1]
         file_name = f"{user.id}{file_extension}"
         file_path = os.path.join(AVATAR_UPLOAD_DIR, file_name)
-
         # Save the file to local storage
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(avatar.file, buffer)
@@ -80,6 +79,4 @@ def update_my_profile(
 
     # 4. Update the 'updated_at' timestamp
     user.updated_at = datetime.now(timezone.utc)
-    
-    # 5. Return the updated profile using your helper
     return build_public_profile(user)
