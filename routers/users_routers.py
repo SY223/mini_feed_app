@@ -76,7 +76,76 @@ def update_my_profile(
             shutil.copyfileobj(avatar.file, buffer)
         # Store the path in the user object
         user.avatar_url = f"/{file_path}"
-
     # 4. Update the 'updated_at' timestamp
     user.updated_at = datetime.now(timezone.utc)
     return build_public_profile(user)
+
+@router.post("/{username}/follow", status_code=204)
+def follow_user(username_to_follow: str, current_user: UserInDB = Depends(get_current_user_dep)):
+    #Find the person to follow
+    target_user = get_user_by_username(username_to_follow)
+    if current_user.id == target_user.id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+    #Update following and followers sets
+    current_user.following.add(target_user.id)
+    target_user.followers.add(current_user.id)
+
+    # 4. Update timestamps for both users
+    current_user.updated_at = datetime.now(timezone.utc)
+    target_user.updated_at = datetime.now(timezone.utc)
+    return {
+        "message": f"You are now following {target_user.username}",
+        "following_count": len(current_user.following)
+    }
+
+@router.delete("/{username}/follow", status_code=200)
+def unfollow_user(username_to_unfollow: str, current_user: UserInDB = Depends(get_current_user_dep)):
+    target_user = get_user_by_username(username_to_unfollow)
+    if target_user.id not in current_user.following:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"You are not following {username_to_unfollow}"
+        )
+    #disconnect follow
+    current_user.following.discard(target_user.id)
+    target_user.followers.discard(current_user.id)
+    #Update timestamps
+    current_user.updated_at = datetime.now(timezone.utc)
+    target_user.updated_at = datetime.now(timezone.utc)
+    return {
+        "message": f"You have unfollowed {username_to_unfollow}",
+        "following_count": len(current_user.following)
+    }
+
+@router.get("/{username}/followers", response_model=FollowersResponse)
+def get_user_followers(username: str):
+    #want to see the followers of the authenticated user
+    target_user = get_user_by_username(username) 
+    # 2. Convert their set of follower IDs into real user objects
+    follower_list = []
+    for follower_id in target_user.followers:
+        # Look up the user by their UUID
+        user_obj = get_user_by_id(str(follower_id))
+        if user_obj:
+            summary = build_follower_summary(user_obj)
+            follower_list.append(summary)     
+    # 3. Return the response matching your FollowersResponse schema
+    return FollowersResponse(
+        username=target_user.username,
+        followers=follower_list
+    )
+
+@router.get("/{username}/following", response_model=FollowingResponse)
+def get_user_following(username: str):
+    # 1. Find the user
+    target_user = get_user_by_username(username)
+    following_list = []
+    for following_id in target_user.following:
+        user_obj = get_user_by_id(str(following_id))
+        if user_obj:
+            following_list.append(build_follower_summary(user_obj))   
+    # 3. Return the response
+    return FollowingResponse(
+        username=target_user.username,
+        following=following_list
+    )
