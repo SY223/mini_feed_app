@@ -25,6 +25,10 @@ class UserInDB(UserPublic):
     following: Set[UUID4] = Field(default_factory=set)
     # New field: active status
     status: bool = True
+    
+    # email verification fields
+    is_email_verified: bool = False
+    email_verified_at: Optional[datetime] = None
 
 
 class LoginRequest(BaseModel):
@@ -38,3 +42,11 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: Optional[str] = None
     token_type: str = "bearer"
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
