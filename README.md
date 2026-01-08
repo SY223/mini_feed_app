@@ -47,16 +47,37 @@ This project is ideal for learning authentication, API design, and backend archi
 mini_social_feed/
 │
 ├── main.py
-├── config.py
-├── schema.py
+│
+├── requirements.txt
+├── README.md
+│
+├── databases/
+│   └── database.py
+│
+├── models/
+│   ├── user_models.py
+│   └── auth_models.py
 │
 ├── routers/
-│   ├── auth.py
-│   └── posts.py        (future expansion)
+│   ├── auth_routers.py
+│   ├── users_routers.py
+│   ├── posts_routers.py
+│   ├── likes_routers.py
+│   ├── comments_routers.py
+│   └── feed_routers.py
 │
-├── .env_example
-├── requirements.txt
-└── README.md
+├── schemas/
+│   ├── users_schemas.py
+│   ├── auth_schema.py
+│   ├── posts_schemas.py
+│   └── feed_schemas.py
+│
+├── services/
+│   ├── users_services.py
+│   ├── auth_services.py
+│   └── config.py
+│
+└── To-do List
 ```
 
 ---
@@ -145,7 +166,78 @@ Includes:
 - In‑memory user storage  
 
 ### **routers/posts.py** *(future)*  
-Placeholder for posts, likes, comments, feed, etc.
+# Mini Social Feed API
+
+A backend API for a social media app where users can create posts (with optional images), like posts, comment, follow users, and view a personalized feed.
+
+## Features
+- User registration, login, logout, and token refresh
+- User profiles (bio, avatar, display name)
+- Follow/unfollow users
+- Create, update, delete posts (with optional images)
+- Like/unlike posts (idempotent)
+- Comment on posts, delete comments
+- Personalized feed (posts from followed users and self)
+- Pagination and search support
+
+## Roles
+- User (default)
+- Admin (optional moderation)
+
+## API Endpoints
+
+### Auth
+- `POST /auth/register` — Register new user
+- `POST /auth/login` — Login
+- `POST /auth/refresh` — Refresh token
+- `POST /auth/logout` — Logout
+- `GET /auth/me` — Get current user info
+
+### Users
+- `GET /users/{username}` — Public profile
+- `PATCH /users/me` — Update profile
+- `POST /users/{username}/follow` — Follow user
+- `DELETE /users/{username}/follow` — Unfollow user
+- `GET /users/{username}/followers` — List followers
+- `GET /users/{username}/following` — List following
+
+### Posts
+- `POST /posts/` — Create post (auth required)
+- `GET /posts/` — List posts (public feed, supports pagination, search, sort)
+- `GET /posts/{post_id}` — View single post
+- `PATCH /posts/{post_id}` — Update post (owner only)
+- `DELETE /posts/{post_id}` — Delete post (owner/admin)
+
+### Likes
+- `POST /likes/posts/{post_id}/like` — Like post (auth required)
+- `DELETE /likes/posts/{post_id}/like` — Unlike post (auth required)
+- `GET /likes/posts/{post_id}/likes` — List users who liked
+
+### Comments
+- `POST /comments/posts/{post_id}/comments` — Add comment (auth required)
+- `GET /comments/posts/{post_id}/comments` — List comments (paginated)
+- `DELETE /comments/{comment_id}` — Delete comment (owner/admin)
+
+### Feed
+- `GET /feed/` — Personalized feed (auth required, paginated)
+
+## Database Models
+- **users**: id, username, email, password_hash, bio, avatar_url, role, timestamps
+- **posts**: id, user_id, title, content, image_url, visibility, timestamps
+- **likes**: id, post_id, user_id, unique(post_id, user_id), timestamps
+- **comments**: id, post_id, user_id, content, timestamps
+- **follows**: follower_id, following_id, unique(follower_id, following_id)
+- **refresh_tokens**: id, user_id, token_hash, revoked_at, expires_at
+
+## Setup
+1. Clone the repo
+2. Install dependencies (`pip install -r requirements.txt`)
+3. Run the app (`uvicorn main:app --reload`)
+
+## Notes
+- Endpoints are stubbed; business logic and database integration required.
+- Designed for FastAPI.
+
 
 ---
 
