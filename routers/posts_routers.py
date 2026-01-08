@@ -29,27 +29,3 @@ def delete_post(post_id: UUID):
     # TODO: Implement delete post
     return {"message": "Post deleted"}
 
-@router.post("/{post_id}/like")
-def like_post(post_id: UUID):
-    # TODO: Implement like post
-    return {"message": "Post liked"}
-
-@router.delete("/{post_id}/like")
-def unlike_post(post_id: UUID):
-    # TODO: Implement unlike post
-    return {"message": "Post unliked"}
-
-@router.get("/{post_id}/likes")
-def list_likes(post_id: UUID):
-    # TODO: Implement list likes
-    return {"users": []}
-
-@router.post("/{post_id}/comments")
-def add_comment(post_id: UUID, content: str = Form(...)):
-    # TODO: Implement add comment
-    return {"message": "Comment added"}
-
-@router.get("/{post_id}/comments")
-def list_comments(post_id: UUID, page: int = 1, limit: int = 10):
-    # TODO: Implement list comments
-    return {"comments": []}
