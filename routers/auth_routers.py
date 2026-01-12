@@ -142,6 +142,23 @@ def register(user_data: UserCreate):
     )
     return UserPublic(**new_user.dict())
 
+@router.get("/verify-email")
+def verify_email(token: str):
+    payload = verify_token(token)
+
+    if payload.get("type") != "email_verify":
+        raise HTTPException(
+            status_code=400, detail="Invalid verification token")
+
+    user_id = payload.get("sub")
+
+    for user in users_db.values():
+        if str(user.id) == user_id:
+            user.is_email_verified = True
+            user.email_verified_at = datetime.now(timezone.utc)
+            return {"message": "Email verified successfully"}
+
+    raise HTTPException(status_code=404, detail="User not found")
 
 @router.post("/login")
 def login(request: OAuth2PasswordRequestForm = Depends()):
@@ -246,23 +263,7 @@ def refresh_access_token(request: TokenRefreshRequest):
     }
 
 
-@router.get("/verify-email")
-def verify_email(token: str):
-    payload = verify_token(token)
 
-    if payload.get("type") != "email_verify":
-        raise HTTPException(
-            status_code=400, detail="Invalid verification token")
-
-    user_id = payload.get("sub")
-
-    for user in users_db.values():
-        if str(user.id) == user_id:
-            user.is_email_verified = True
-            user.email_verified_at = datetime.now(timezone.utc)
-            return {"message": "Email verified successfully"}
-
-    raise HTTPException(status_code=404, detail="User not found")
 
 
 @router.post("/password-reset/request")
